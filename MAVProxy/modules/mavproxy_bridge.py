@@ -2,6 +2,8 @@
 '''module bridge'''
 
 import time, math
+import threading
+import zmq
 from pymavlink import mavutil
 from MAVProxy.modules.lib import mp_module
 #from MAVProxy.modules.lib.mp_settings import MPSetting
@@ -24,7 +26,19 @@ class BridgeModule(mp_module.MPModule):
         self.pitch = 0
         self.yaw = 0
         self.heading = 0
-        
+
+        lock = threading.Lock()
+        # Create new threads
+        thread1 = zmqSubThread(self, lock)
+
+        # Start new Threads
+        thread1.start()
+
+        print "Exiting Main Thread"
+
+
+
+
     def handle_attitude(self, m):
         self.roll = m.roll
         self.pitch = m.pitch
@@ -71,3 +85,31 @@ class BridgeModule(mp_module.MPModule):
 def init(mpstate):
     '''initialise module'''
     return BridgeModule(mpstate)
+
+
+
+exitFlag = 0
+
+class zmqSubThread (threading.Thread):
+    def __init__(self, safedata, lock):
+        threading.Thread.__init__(self)
+        self.threadID = 1
+        self.name = "zmqsubthread"
+        self.safedata = safedata
+        self.lock = lock        
+
+        context = zmq.Context()
+        socket = context.socket(zmq.SUB)
+        socket.connect ("tcp://localhost:5561")
+        socket.setsockopt(zmq.SUBSCRIBE, "TIMER")
+        self.socket = socket
+    def run(self):
+        print "Starting " + self.name
+
+        while True:
+            self.socket.recv()
+            self.lock.acquire()
+            print 'TIMER** - Roll: %.5f Pitch:.%5f Yaw:%.5f' % (self.safedata.roll, self.safedata.pitch, self.safedata.yaw)        
+            self.lock.release()
+
+        print "Exiting " + self.name

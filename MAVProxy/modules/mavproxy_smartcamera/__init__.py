@@ -16,7 +16,7 @@
 #
 # Responsible  : Jaime Machuca
 #
-# License      : CC BY-NC-SA
+# License      : GNU GPL version 3
 #
 # Editor Used  : Xcode 6.1.1 (6A2008a)
 #
@@ -27,7 +27,7 @@
 #****************************************************************************
 
 # System Header files and Module Headers
-import time, math, sched
+import time, math, sched, threading
 
 # Module Dependent Headers
 from pymavlink import mavutil
@@ -78,6 +78,7 @@ class SmartCameraModule(mp_module.MPModule):
         self.add_command('setCamAperture', self.__vCmdSetCamAperture, "Set Camera Aperture")
         self.add_command('setCamShutterSpeed', self.__vCmdSetCamShutterSpeed, "Set Camera Shutter Speed")
         self.add_command('setCamExposureMode', self.__vCmdSetCamExposureMode, "Set Camera Exposure Mode")
+        self.add_command('getAllPictures', self.__vCmdGetAllPictures, "Download all flight pictures, filename as argument optional")
         self.CamRetryScheduler = sched.scheduler(time.time, time.sleep)
         self.ProgramAuto = 1
         self.Aperture = 2
@@ -88,7 +89,35 @@ class SmartCameraModule(mp_module.MPModule):
         self.WirelessPort = sc_config.config.get_string("general", 'WirelessPort', "wlan0")
         self.u8RetryTimeout = 0
         self.u8MaxRetries = 5
+        self.tLastCheckTime = time.time()
+        self.u8KillHeartbeatTimer = 100
         self.__vRegisterCameras()
+
+        self.mpstate = mpstate
+        
+        # Start a 10 second timer to kill heartbeats as a workaround
+        # threading.Timer(10, self.__vKillHeartbeat).start()
+    
+#****************************************************************************
+#   Method Name     : __vKillHeartbeat
+#
+#   Description     : Sets heartbeat setting to 0 to stop sending heartbeats
+#                     this is a temporary workaround for systems that do not
+#                     properly interpret the heartbeat contents like 3DR Solo
+#                     in such systems the heartbeats from the camera controller
+#                     and the main system are confused causing potential issues
+#
+#   Parameters      : None
+#
+#   Return Value    : None
+#
+#   Author           : Jaime Machuca
+#
+#****************************************************************************
+
+    def __vKillHeartbeat(self):
+        print("Killing Heartbeat - Solo Workaround")
+        self.mpstate.settings.heartbeat = 0
 
  #****************************************************************************
  #   Method Name     : __vRegisterQXCamera
@@ -111,6 +140,7 @@ class SmartCameraModule(mp_module.MPModule):
             if new_camera.boValidCameraFound() is True:
                 self.camera_list = self.camera_list + [new_camera]
                 print("Found QX Camera")
+                self.master.mav.statustext_send(6,"Camera Controller: Found QX Camera, Ready to Fly")
             else:
                 print("No Valid Camera Found, retry in 5 sec")
                 self.u8RetryTimeout = self.u8RetryTimeout + 1
@@ -118,6 +148,7 @@ class SmartCameraModule(mp_module.MPModule):
                 self.CamRetryScheduler.run()
         else:
             print("Max retries reached, No QX Camera Found")
+            self.master.mav.statustext_send(3,"Camera Controller: Warning! Camera not found")
             self.u8RetryTimeout = 0
 
 #****************************************************************************
@@ -327,6 +358,32 @@ class SmartCameraModule(mp_module.MPModule):
             cam.boZoomOut()
 
 #****************************************************************************
+#   Method Name     : __vCmdGetAllPictures
+#
+#   Description     : Downloads all the pics taken during this flight
+#
+#   Parameters      : None
+#
+#   Return Value    : None
+#
+#   Author           : Jaime Machuca
+#
+#****************************************************************************
+
+    def __vCmdGetAllPictures(self, args):
+        
+        #Download Pictures
+        if len(args) >= 1:
+            slogFileName = args[0]
+            for cam in self.camera_list:
+                print("Init Picture Download for Cam %s from file %s" % cam, slogFileName)
+                cam.boGetAllSessionPictures(slogFileName)
+        else:
+            for cam in self.camera_list:
+                print("Init Picture Download for Cam %s" % cam)
+                cam.boGetAllSessionPictures(0)
+    
+#****************************************************************************
 #   Method Name     : __vDecodeDIGICAMConfigure
 #
 #   Description     : Decode and process the camera configuration Messages
@@ -451,6 +508,27 @@ class SmartCameraModule(mp_module.MPModule):
             elif m.command == mavutil.mavlink.MAV_CMD_DO_DIGICAM_CONTROL:
                 print ("Got Message Digicam_control")
                 self.__vDecodeDIGICAMControl(m)
+
+#****************************************************************************
+#   Method Name     : idle_task
+#
+#   Description     : used for heartbeat work arround timer
+#
+#   Parameters      : none
+#
+#   Return Value    : none
+#
+#   Author           : Jaime Machuca
+#
+#****************************************************************************
+
+    def idle_task(self):
+        now = time.time()
+        if not self.u8KillHeartbeatTimer == 0 and self.tLastCheckTime > 1:
+            self.tLastCheckTime = now
+            self.u8KillHeartbeatTimer -= 1
+            if self.u8KillHeartbeatTimer == 0:
+                self.__vKillHeartbeat();
 
 #****************************************************************************
 #   Method Name     : init

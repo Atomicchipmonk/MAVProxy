@@ -35,6 +35,8 @@ class mavmemlog(mavutil.mavfile):
         if last_timestamp is not None and len(self._flightmodes) > 0:
             (mode, t1, t2) = self._flightmodes[-1]
             self._flightmodes[-1] = (mode, t1, last_timestamp)
+        # swipe some state from the original:
+        self.mav_type = getattr(mav, 'mav_type',None)
 
 
     def recv_msg(self):
@@ -73,7 +75,6 @@ class mavmemlog(mavutil.mavfile):
         self._flightmode_index = 0
         self._timestamp = None
         self.flightmode = None
-        self.params = {}
 
     def flightmode_list(self):
         '''return list of all flightmodes as tuple of mode and start time'''

@@ -7,6 +7,8 @@ June 2012
 '''
 
 from wx_loader import wx
+import cv2
+import numpy as np
 
 class ImagePanel(wx.Panel):
     '''a resizable panel containing an image'''
@@ -23,5 +25,12 @@ class ImagePanel(wx.Panel):
 
     def set_image(self, img):
         '''set the image to be displayed'''
-        self._bmp = wx.BitmapFromImage(img)
+        if hasattr(img, 'shape'):
+            (width, height) = (img.shape[1], img.shape[0])
+            self._bmp = wx.BitmapFromBuffer(width, height, np.uint8(img)) # http://stackoverflow.com/a/16866833/2559632
+        elif hasattr(img, 'GetHeight'):
+            self._bmp = wx.BitmapFromImage(img)
+        else:
+            print("Unsupported image type: %s" % type(img))
+            return
         self.SetMinSize((self._bmp.GetWidth(), self._bmp.GetHeight()))

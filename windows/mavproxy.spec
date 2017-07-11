@@ -4,7 +4,7 @@ MAVProxyAny = Analysis(['mavproxy.py'],
              pathex=[os.path.abspath('.')],
              # for some unknown reason these hidden imports don't pull in
              # all the needed pieces, so we also import them in mavproxy.py
-             hiddenimports=['cv', 'cv2', 'wx', 'pylab', 
+             hiddenimports=['cv2', 'wx', 'pylab', 
                             'numpy', 'dateutil', 'matplotlib',
                             'pymavlink.mavwp', 'pymavlink.mavutil', 
                             'pyreadline', 'pymavlink.dialects.v20.ardupilotmega',
@@ -28,14 +28,14 @@ MAVProxyAny = Analysis(['mavproxy.py'],
                             'pygame.transform', 'pygame.surface', 'pygame.bufferproxy', 'wx._grid',
                             'wx.lib.agw.genericmessagedialog', 'wx.lib.wordwrap', 'wx.lib.buttons',
                             'wx.lib.embeddedimage', 'wx.lib.imageutils', 'wx.lib.agw.aquabutton', 
-                            'wx.lib.agw.gradientbutton', 'wxversion', 'UserList', 'UserString'],
+                            'wx.lib.agw.gradientbutton', 'wxversion', 'UserList', 'UserString', 'yaml', 'yaml.error', 'yaml.tokens', 'yaml.events', 'yaml.nodes', 'yaml.loader', 'yaml.dumper', 'yaml.reader', 'yaml.scanner', 'yaml.parser', 'yaml.composer', 'yaml.constructor', 'yaml.resolver', 'yaml.emitter', 'yaml.serializer', 'yaml.representer'],
              hookspath=None,
              runtime_hooks=None)
 MAVExpAny = Analysis(['.\\tools\\MAVExplorer.py'],
              pathex=[os.path.abspath('.')],
              # for some unknown reason these hidden imports don't pull in
              # all the needed pieces, so we also import them in mavproxy.py
-             hiddenimports=['cv', 'cv2', 'wx', 'pylab', 
+             hiddenimports=['cv2', 'wx', 'pylab', 
                             'numpy', 'dateutil', 'matplotlib',
                             'pymavlink.mavwp', 'pymavlink.mavutil', 'pymavlink.dialects.v20.ardupilotmega',
                             'pymavlink.dialects.v10.ardupilotmega',

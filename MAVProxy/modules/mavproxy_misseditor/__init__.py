@@ -15,6 +15,8 @@ from pymavlink import mavutil
 
 import multiprocessing, time
 import threading
+import Queue
+import traceback
 
 class MissionEditorEventThread(threading.Thread):
     def __init__(self, mp_misseditor, q, l):
@@ -174,6 +176,31 @@ class MissionEditorModule(mp_module.MPModule):
         self.last_unload_check_time = time.time()
         self.unload_check_interval = 0.1 # seconds
 
+        self.time_to_quit = False
+        self.mavlink_message_queue = Queue.Queue()
+        self.mavlink_message_queue_handler = threading.Thread(target=self.mavlink_message_queue_handler)
+        self.mavlink_message_queue_handler.start()
+
+
+    def mavlink_message_queue_handler(self):
+        while not self.time_to_quit:
+            try:
+                m = self.mavlink_message_queue.get(block=0)
+            except Queue.Empty:
+                time.sleep(0.1)
+                continue
+
+            #MAKE SURE YOU RELEASE THIS LOCK BEFORE LEAVING THIS METHOD!!!
+            #No "return" statement should be put in this method!
+            self.gui_event_queue_lock.acquire()
+
+            try:
+                self.process_mavlink_packet(m)
+            except Exception as e:
+                print("Caught exception (%s)" % str(e))
+                traceback.print_stack()
+
+            self.gui_event_queue_lock.release()
 
     def unload(self):
         '''unload module'''
@@ -189,13 +216,15 @@ class MissionEditorModule(mp_module.MPModule):
 
 
     def mavlink_packet(self, m):
+        if m.get_type() in ['WAYPOINT_COUNT','MISSION_COUNT', 'WAYPOINT', 'MISSION_ITEM']:
+            self.mavlink_message_queue.put(m)
+
+    def process_mavlink_packet(self, m):
         '''handle an incoming mavlink packet'''
         mtype = m.get_type()
 
-        #MAKE SURE YOU RELEASE THIS LOCK BEFORE LEAVING THIS METHOD!!!
-        #No "return" statement should be put in this method!
-        self.gui_event_queue_lock.acquire()
-
+        # if you add processing for an mtype here, remember to add it
+        # to mavlink_packet, above
         if mtype in ['WAYPOINT_COUNT','MISSION_COUNT']:
             if (self.num_wps_expected == 0):
                 #I haven't asked for WPs, or these messages are duplicates
@@ -230,8 +259,6 @@ class MissionEditorModule(mp_module.MPModule):
                         lat=m.x,lon=m.y,alt=m.z,frame=m.frame))
 
                     self.wps_received[m.seq] = True
-
-        self.gui_event_queue_lock.release()
 
     def child_task(self, q, l, gq, gl, cw_sem):
         '''child process - this holds GUI elements'''
@@ -272,11 +299,14 @@ class MissionEditorModule(mp_module.MPModule):
 
     def close(self):
         '''close the Mission Editor window'''
+        self.time_to_quit = True
         self.close_window.release()
         if self.child.is_alive():
             self.child.join(1)
 
         self.child.terminate()
+
+        self.mavlink_message_queue_handler.join()
 
         self.event_queue_lock.acquire()
         self.event_queue.put(MissionEditorEvent(me_event.MEE_TIME_TO_QUIT));

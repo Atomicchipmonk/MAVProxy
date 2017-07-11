@@ -18,7 +18,7 @@ else:
     try:
         imp.find_module('wx')
         has_wxpython = True
-    except ImportError, e:
+    except ImportError as e:
         pass
 
 radius_of_earth = 6378100.0 # in meters
@@ -222,7 +222,10 @@ def PILTowx(pimg):
 
 def dot_mavproxy(name=None):
     '''return a path to store mavproxy data'''
-    dir = os.path.join(os.environ['HOME'], '.mavproxy')
+    if 'HOME' not in os.environ:
+        dir = os.path.join(os.environ['LOCALAPPDATA'], '.mavproxy')
+    else:
+        dir = os.path.join(os.environ['HOME'], '.mavproxy')
     mkdir_p(dir)
     if name is None:
         return dir
@@ -279,3 +282,14 @@ def child_fd_list_remove(fd):
         child_fd_list.remove(fd)
     except Exception:
         pass
+
+def quaternion_to_axis_angle(q):
+    from pymavlink.rotmat import Vector3
+    a, b, c, d = q.q
+    n = math.sqrt(b**2 + c**2 + d**2)
+    if not n:
+        return Vector3(0, 0, 0)
+    angle = 2 * math.acos(a)
+    if angle > math.pi:
+        angle = angle - 2 * math.pi
+    return Vector3(angle * b / n, angle * c / n, angle * d / n)

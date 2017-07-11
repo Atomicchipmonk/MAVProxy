@@ -4,11 +4,8 @@ import mp_elevation
 import os
 import functools
 from mp_slipmap_util import *
-
-try:
-    import cv2.cv as cv
-except ImportError:
-    import cv
+import cv2
+import numpy as np
 
 class MPSlipMapFrame(wx.Frame):
     """ The main frame of the viewer
@@ -27,6 +24,7 @@ class MPSlipMapFrame(wx.Frame):
         state.panel = MPSlipMapPanel(self, state)
         self.Bind(wx.EVT_IDLE, self.on_idle)
         self.Bind(wx.EVT_SIZE, state.panel.on_size)
+        self.legend_checkbox_menuitem_added = False
 
         # create the View menu
         self.menu = MPMenuTop([MPMenuSubMenu('View',
@@ -73,6 +71,8 @@ class MPSlipMapFrame(wx.Frame):
         ret.call_handler()
         if ret.returnkey == 'toggleGrid':
             state.grid = ret.IsChecked()
+        elif ret.returnkey == 'toggleLegend':
+            state.legend = ret.IsChecked()
         elif ret.returnkey == 'toggleFollow':
             state.follow = ret.IsChecked()
         elif ret.returnkey == 'toggleDownload':
@@ -117,14 +117,26 @@ class MPSlipMapFrame(wx.Frame):
         (lat, lon) = object.latlon
         state.panel.re_center(state.width/2, state.height/2, lat, lon)
 
+    def add_legend_checkbox_menuitem(self):
+        self.menu.add_to_submenu(['View'], [MPMenuCheckbox('Legend\tCtrl+L',
+                                                         'Enable Legend',
+                                                         'toggleLegend',
+                                                         checked=self.state.legend)
+        ])
+
     def add_object(self, obj):
-        '''add an object to a later'''
+        '''add an object to a layer'''
         state = self.state
         if not obj.layer in state.layers:
             # its a new layer
             state.layers[obj.layer] = {}
         state.layers[obj.layer][obj.key] = obj
         state.need_redraw = True
+        if (not self.legend_checkbox_menuitem_added and
+            isinstance(obj, SlipFlightModeLegend)):
+            self.add_legend_checkbox_menuitem()
+            self.legend_checkbox_menuitem_added = True
+            self.SetMenuBar(self.menu.wx_menu())
 
     def remove_object(self, key):
         '''remove an object by key from all layers'''
@@ -256,7 +268,7 @@ class MPSlipMapPanel(wx.Panel):
         self.mainSizer.AddSpacer(2)
 
         # panel for the main map image
-        self.imagePanel = mp_widgets.ImagePanel(self, wx.EmptyImage(state.width,state.height))
+        self.imagePanel = mp_widgets.ImagePanel(self, np.zeros((state.height, state.width, 3), dtype=np.uint8))
         self.mainSizer.Add(self.imagePanel, flag=wx.GROW, border=5)
         self.imagePanel.Bind(wx.EVT_MOUSE_EVENTS, self.on_mouse)
         self.imagePanel.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
@@ -376,6 +388,8 @@ class MPSlipMapPanel(wx.Panel):
         keys.sort()
         for k in keys:
             obj = objects[k]
+            if not self.state.legend and isinstance(obj, SlipFlightModeLegend):
+                continue
             bounds2 = obj.bounds()
             if bounds2 is None or mp_util.bounds_overlap(bounds, bounds2):
                 obj.draw(img, self.pixmapper, bounds)
@@ -384,7 +398,7 @@ class MPSlipMapPanel(wx.Panel):
         '''redraw the map with current settings'''
         state = self.state
 
-        view_same = (self.last_view and self.map_img and self.last_view == self.current_view())
+        view_same = (self.last_view is not None and self.map_img is not None and self.last_view == self.current_view())
 
         if view_same and not state.need_redraw:
             return
@@ -393,7 +407,7 @@ class MPSlipMapPanel(wx.Panel):
         self.map_img = state.mt.area_to_image(state.lat, state.lon,
                                               state.width, state.height, state.ground_width)
         if state.brightness != 1.0:
-            cv.ConvertScale(self.map_img, self.map_img, scale=state.brightness)
+            self.map_img = self.map_img*state.brightness
 
 
         # find display bounding box
@@ -401,7 +415,7 @@ class MPSlipMapPanel(wx.Panel):
         bounds = (lat2, state.lon, state.lat-lat2, lon2-state.lon)
 
         # get the image
-        img = cv.CloneImage(self.map_img)
+        img = self.map_img.copy()
 
         # possibly draw a grid
         if state.grid:
@@ -418,9 +432,7 @@ class MPSlipMapPanel(wx.Panel):
             state.info[key].draw(state.panel, state.panel.information)
 
         # display the image
-        self.img = wx.EmptyImage(state.width,state.height)
-        self.img.SetData(img.tostring())
-        self.imagePanel.set_image(self.img)
+        self.imagePanel.set_image(img)
 
         self.update_position()
 

@@ -6,6 +6,7 @@
 
 from ..lib.wx_loader import wx
 from wx import grid
+import traceback
 
 # begin wxGlade: dependencies
 # end wxGlade
@@ -38,7 +39,7 @@ class MissionEditorFrame(wx.Frame):
         # begin wxGlade: MissionEditorFrame.__init__
         kwds["style"] = wx.DEFAULT_FRAME_STYLE
         wx.Frame.__init__(self, *args, **kwds)
-        self.label_sync_state = wx.StaticText(self, wx.ID_ANY, "SYNCED     \n", style=wx.ALIGN_CENTRE)
+        self.label_sync_state = wx.StaticText(self, wx.ID_ANY, "UNSYNCED   \n", style=wx.ALIGN_CENTRE)
         self.label_wp_radius = wx.StaticText(self, wx.ID_ANY, "WP Radius")
         self.text_ctrl_wp_radius = wx.TextCtrl(self, wx.ID_ANY, "", style=wx.TE_PROCESS_ENTER | wx.TE_PROCESS_TAB)
         self.label_loiter_rad = wx.StaticText(self, wx.ID_ANY, "Loiter Radius")
@@ -117,7 +118,7 @@ class MissionEditorFrame(wx.Frame):
         # begin wxGlade: MissionEditorFrame.__set_properties
         self.SetTitle("Mission Editor")
         self.SetSize((820, 480))
-        self.label_sync_state.SetForegroundColour(wx.Colour(12, 152, 26))
+        self.label_sync_state.SetForegroundColour(wx.Colour(255, 0, 0))
         self.label_sync_state.SetFont(wx.Font(14, wx.DEFAULT, wx.NORMAL, wx.NORMAL, 0, "Droid Sans"))
         self.text_ctrl_wp_radius.SetMinSize((50, 27))
         self.text_ctrl_loiter_radius.SetMinSize((50, 27))
@@ -228,88 +229,11 @@ class MissionEditorFrame(wx.Frame):
         while self.gui_event_queue.qsize() > 0 and (time.time() < queue_access_start_time) < 0.6:
             event_processed = True
             event = self.gui_event_queue.get()
-            if event.get_type() == me_event.MEGE_CLEAR_MISS_TABLE:
-                self.grid_mission.ClearGrid()
-                if (self.grid_mission.GetNumberRows() > 0):
-                    self.grid_mission.DeleteRows(0,
-                            self.grid_mission.GetNumberRows())
-                self.grid_mission.SetDefaultColSize(50, True)
-                self.grid_mission.SetColSize(ME_COMMAND_COL, 150)
-                self.grid_mission.SetColSize(ME_LAT_COL, 100)
-                self.grid_mission.SetColSize(ME_LON_COL, 100)
-                self.grid_mission.SetColSize(ME_ALT_COL, 75)
-
-                self.grid_mission.ForceRefresh()
-            elif event.get_type() == me_event.MEGE_ADD_MISS_TABLE_ROWS:
-                num_new_rows = event.get_arg("num_rows")
-                if (num_new_rows < 1):
-                    continue
-                old_num_rows = self.grid_mission.GetNumberRows()
-                self.grid_mission.AppendRows(num_new_rows)
-                self.prep_new_rows(old_num_rows, num_new_rows)
-                self.grid_mission.ForceRefresh()
-            elif event.get_type() == me_event.MEGE_SET_MISS_ITEM:
-                row = event.get_arg("num") - 1
-                command = event.get_arg("command")
-
-                if row == -1:
-                    #1st mission item is special: it's the immutable home poitn
-                    self.label_home_lat_value.SetLabel(
-                            str(event.get_arg("lat")))
-                    self.label_home_lon_value.SetLabel(
-                            str(event.get_arg("lon")))
-                    self.label_home_alt_value.SetLabel(
-                            str(event.get_arg("alt")))
-
-                else: #not the first mission item
-                    if (me_defines.miss_cmds.has_key(command)):
-                        self.grid_mission.SetCellValue(row, ME_COMMAND_COL,
-                                me_defines.miss_cmds[command])
-                    else:
-                        self.grid_mission.SetCellValue(row, ME_COMMAND_COL,
-                                str(command))
-
-                    self.grid_mission.SetCellValue(row, ME_P1_COL,
-                            str(event.get_arg("param1")))
-                    self.grid_mission.SetCellValue(row, ME_P2_COL,
-                            str(event.get_arg("param2")))
-                    self.grid_mission.SetCellValue(row, ME_P3_COL,
-                            str(event.get_arg("param3")))
-                    self.grid_mission.SetCellValue(row, ME_P4_COL,
-                            str(event.get_arg("param4")))
-                    self.grid_mission.SetCellValue(row, ME_LAT_COL,
-                            str(event.get_arg("lat")))
-                    self.grid_mission.SetCellValue(row, ME_LON_COL,
-                            str(event.get_arg("lon")))
-                    self.grid_mission.SetCellValue(row, ME_ALT_COL,
-                            "%.2f" % event.get_arg("alt"))
-
-                    frame_num = event.get_arg("frame")
-                    if (me_defines.frame_enum.has_key(frame_num)):
-                        self.grid_mission.SetCellValue(row, ME_FRAME_COL,
-                            me_defines.frame_enum[frame_num])
-                    else:
-                        self.grid_mission.SetCellValue(row, ME_FRAME_COL, "Und")
-
-
-            elif event.get_type() == me_event.MEGE_SET_WP_RAD:
-                self.text_ctrl_wp_radius.SetValue(str(event.get_arg("wp_rad")))
-                self.text_ctrl_wp_radius.SetForegroundColour(wx.Colour(0, 0, 0))
-            elif event.get_type() == me_event.MEGE_SET_LOIT_RAD:
-                loiter_radius = event.get_arg("loit_rad")
-                self.text_ctrl_loiter_radius.SetValue(
-                        str(math.fabs(loiter_radius)))
-                self.text_ctrl_loiter_radius.SetForegroundColour(wx.Colour(0, 0, 0))
-                if (loiter_radius < 0.0):
-                    self.checkbox_loiter_dir.SetValue(False)
-                else:
-                    self.checkbox_loiter_dir.SetValue(True)
-            elif event.get_type() == me_event.MEGE_SET_WP_DEFAULT_ALT:
-                self.text_ctrl_wp_default_alt.SetValue(str(
-                    event.get_arg("def_wp_alt")))
-                self.text_ctrl_wp_default_alt.SetForegroundColour(wx.Colour(0, 0, 0))
-            elif event.get_type() == me_event.MEGE_SET_LAST_MAP_CLICK_POS:
-                self.last_map_click_pos = event.get_arg("click_pos")
+            try:
+                self.process_gui_event(event)
+            except Exception as e:
+                print("Caught exception (%s)" % str(e))
+                traceback.print_stack()
 
         self.gui_event_queue_lock.release()
 
@@ -317,6 +241,90 @@ class MissionEditorFrame(wx.Frame):
             #redraw window to apply changes
             self.Refresh()
             self.Update()
+
+    def process_gui_event(self, event):
+        if event.get_type() == me_event.MEGE_CLEAR_MISS_TABLE:
+            self.grid_mission.ClearGrid()
+            if (self.grid_mission.GetNumberRows() > 0):
+                self.grid_mission.DeleteRows(0,
+                        self.grid_mission.GetNumberRows())
+            self.grid_mission.SetDefaultColSize(50, True)
+            self.grid_mission.SetColSize(ME_COMMAND_COL, 150)
+            self.grid_mission.SetColSize(ME_LAT_COL, 100)
+            self.grid_mission.SetColSize(ME_LON_COL, 100)
+            self.grid_mission.SetColSize(ME_ALT_COL, 75)
+
+            self.grid_mission.ForceRefresh()
+        elif event.get_type() == me_event.MEGE_ADD_MISS_TABLE_ROWS:
+            num_new_rows = event.get_arg("num_rows")
+            if (num_new_rows < 1):
+                return
+            old_num_rows = self.grid_mission.GetNumberRows()
+            self.grid_mission.AppendRows(num_new_rows)
+            self.prep_new_rows(old_num_rows, num_new_rows)
+            self.grid_mission.ForceRefresh()
+        elif event.get_type() == me_event.MEGE_SET_MISS_ITEM:
+            row = event.get_arg("num") - 1
+            command = event.get_arg("command")
+
+            if row == -1:
+                #1st mission item is special: it's the immutable home poitn
+                self.label_home_lat_value.SetLabel(
+                        str(event.get_arg("lat")))
+                self.label_home_lon_value.SetLabel(
+                        str(event.get_arg("lon")))
+                self.label_home_alt_value.SetLabel(
+                        str(event.get_arg("alt")))
+
+            else: #not the first mission item
+                if (me_defines.miss_cmds.has_key(command)):
+                    self.grid_mission.SetCellValue(row, ME_COMMAND_COL,
+                            me_defines.miss_cmds[command])
+                else:
+                    self.grid_mission.SetCellValue(row, ME_COMMAND_COL,
+                            str(command))
+
+                self.grid_mission.SetCellValue(row, ME_P1_COL,
+                        str(event.get_arg("param1")))
+                self.grid_mission.SetCellValue(row, ME_P2_COL,
+                        str(event.get_arg("param2")))
+                self.grid_mission.SetCellValue(row, ME_P3_COL,
+                        str(event.get_arg("param3")))
+                self.grid_mission.SetCellValue(row, ME_P4_COL,
+                        str(event.get_arg("param4")))
+                self.grid_mission.SetCellValue(row, ME_LAT_COL,
+                        str(event.get_arg("lat")))
+                self.grid_mission.SetCellValue(row, ME_LON_COL,
+                        str(event.get_arg("lon")))
+                self.grid_mission.SetCellValue(row, ME_ALT_COL,
+                        "%.2f" % event.get_arg("alt"))
+
+                frame_num = event.get_arg("frame")
+                if (me_defines.frame_enum.has_key(frame_num)):
+                    self.grid_mission.SetCellValue(row, ME_FRAME_COL,
+                        me_defines.frame_enum[frame_num])
+                else:
+                    self.grid_mission.SetCellValue(row, ME_FRAME_COL, "Und")
+
+
+        elif event.get_type() == me_event.MEGE_SET_WP_RAD:
+            self.text_ctrl_wp_radius.SetValue(str(event.get_arg("wp_rad")))
+            self.text_ctrl_wp_radius.SetForegroundColour(wx.Colour(0, 0, 0))
+        elif event.get_type() == me_event.MEGE_SET_LOIT_RAD:
+            loiter_radius = event.get_arg("loit_rad")
+            self.text_ctrl_loiter_radius.SetValue(
+                    str(math.fabs(loiter_radius)))
+            self.text_ctrl_loiter_radius.SetForegroundColour(wx.Colour(0, 0, 0))
+            if (loiter_radius < 0.0):
+                self.checkbox_loiter_dir.SetValue(False)
+            else:
+                self.checkbox_loiter_dir.SetValue(True)
+        elif event.get_type() == me_event.MEGE_SET_WP_DEFAULT_ALT:
+            self.text_ctrl_wp_default_alt.SetValue(str(
+                event.get_arg("def_wp_alt")))
+            self.text_ctrl_wp_default_alt.SetForegroundColour(wx.Colour(0, 0, 0))
+        elif event.get_type() == me_event.MEGE_SET_LAST_MAP_CLICK_POS:
+            self.last_map_click_pos = event.get_arg("click_pos")
 
     def prep_new_row(self, row_num):
         command_choices = me_defines.miss_cmds.values()
@@ -496,7 +504,6 @@ class MissionEditorFrame(wx.Frame):
         event.Skip()
 
     def on_mission_grid_cell_select(self, event):  # wxGlade: MissionEditorFrame.<event_handler>
-        command = self.grid_mission.GetCellValue(event.GetRow(), ME_COMMAND_COL)
         self.grid_mission.SetColLabelValue(ME_P1_COL, "P1")
         self.grid_mission.SetColLabelValue(ME_P2_COL, "P2")
         self.grid_mission.SetColLabelValue(ME_P3_COL, "P3")
@@ -504,6 +511,12 @@ class MissionEditorFrame(wx.Frame):
         self.grid_mission.SetColLabelValue(ME_LAT_COL, "Lat")
         self.grid_mission.SetColLabelValue(ME_LON_COL, "Lon")
         self.grid_mission.SetColLabelValue(ME_ALT_COL, "Alt")
+
+        if event.GetRow() == self.grid_mission.GetNumberRows():
+            # this event fires when last row is deleted; ignore
+            # attempt to set a cell in that deleted row as selected.
+            return
+        command = self.grid_mission.GetCellValue(event.GetRow(), ME_COMMAND_COL)
 
         col_labels = me_defines.get_column_labels(command)
         for col in col_labels.keys():

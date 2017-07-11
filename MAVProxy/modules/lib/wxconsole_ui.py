@@ -19,8 +19,7 @@ class ConsoleFrame(wx.Frame):
         self.menu = None
         self.menu_callback = None
 
-        self.control = wx.TextCtrl(self.panel, style=wx.TE_MULTILINE | wx.TE_READONLY)
-
+        self.control = wx.TextCtrl(self.panel, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_AUTO_URL)
 
         self.vbox = wx.BoxSizer(wx.VERTICAL)
         # start with one status row
@@ -36,6 +35,7 @@ class ConsoleFrame(wx.Frame):
         self.timer.Start(100)
 
         self.Bind(wx.EVT_IDLE, self.on_idle)
+        self.Bind(wx.EVT_TEXT_URL, self.on_text_url)
 
         self.Show(True)
         self.pending = []
@@ -48,6 +48,25 @@ class ConsoleFrame(wx.Frame):
             return
         ret.call_handler()
         state.child_pipe_send.send(ret)
+
+    def on_text_url(self, event):
+        '''handle double clicks on URL text'''
+        try:
+            import webbrowser
+        except ImportError:
+            return
+        mouse_event = event.GetMouseEvent()
+        if mouse_event.LeftDClick():
+            url_start = event.GetURLStart()
+            url_end = event.GetURLEnd()
+            url = self.control.GetRange(url_start, url_end)
+            try:
+                # attempt to use google-chrome
+                browser_controller = webbrowser.get('google-chrome')
+                browser_controller.open_new_tab(url)
+            except webbrowser.Error:
+                # use the system configured default browser
+                webbrowser.open_new_tab(url)
 
     def on_idle(self, event):
         time.sleep(0.05)

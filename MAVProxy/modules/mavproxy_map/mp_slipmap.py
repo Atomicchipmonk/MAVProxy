@@ -10,11 +10,8 @@ import functools
 import math
 import os, sys
 import time
-
-try:
-    import cv2.cv as cv
-except ImportError:
-    import cv
+import cv2
+import numpy as np
 
 from MAVProxy.modules.mavproxy_map import mp_elevation
 from MAVProxy.modules.mavproxy_map import mp_tile
@@ -39,7 +36,8 @@ class MPSlipMap():
                  debug=False,
                  brightness=1.0,
                  elevation=False,
-                 download=True):
+                 download=True,
+                 show_flightmode_legend=True):
         import multiprocessing
 
         self.lat = lat
@@ -55,6 +53,7 @@ class MPSlipMap():
         self.elevation = elevation
         self.oldtext = None
         self.brightness = brightness
+        self.legend = show_flightmode_legend
 
         self.drag_step = 10
 
@@ -201,11 +200,11 @@ if __name__ == "__main__":
         sm.add_object(SlipGrid('grid', layer=3, linewidth=1, colour=(255,255,0)))
 
     if opts.thumbnail:
-        thumb = cv.LoadImage(opts.thumbnail)
+        thumb = cv2.imread(opts.thumbnail)
         sm.add_object(SlipThumbnail('thumb', (opts.lat,opts.lon), layer=1, img=thumb, border_width=2, border_colour=(255,0,0)))
 
     if opts.icon:
-        icon = cv.LoadImage(opts.icon)
+        icon = cv2.imread(opts.icon)
         sm.add_object(SlipIcon('icon', (opts.lat,opts.lon), icon, layer=3, rotation=90, follow=True))
         sm.set_position('icon', mp_util.gps_newpos(opts.lat,opts.lon, 180, 100), rotation=45)
         sm.add_object(SlipInfoImage('detail', icon))

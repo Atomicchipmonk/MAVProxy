@@ -10,16 +10,19 @@ import functools
 import math
 import os, sys
 import time
-
-try:
-    import cv2.cv as cv
-except ImportError:
-    import cv
+import cv2
+import numpy as np
 
 from MAVProxy.modules.mavproxy_map import mp_elevation
 from MAVProxy.modules.mavproxy_map import mp_tile
 from MAVProxy.modules.lib import mp_util
 
+def image_shape(img):
+    '''handle different image formats, returning (width,height) tuple'''
+    if hasattr(img, 'shape'):
+        return (img.shape[1], img.shape[0])
+    return (img.width, img.height)
+    
 
 class SlipObject:
     '''an object to display on the map'''
@@ -43,10 +46,11 @@ class SlipObject:
             sy = -py
             h += py
             py = 0
-        if px+w > img.width:
-            w = img.width - px
-        if py+h > img.height:
-            h = img.height - py
+        (width, height) = image_shape(img)
+        if px+w > width:
+            w = width - px
+        if py+h > height:
+            h = height - py
         return (px, py, sx, sy, w, h)
 
     def draw(self, img, pixmapper, bounds):
@@ -90,7 +94,7 @@ class SlipLabel(SlipObject):
 
     def draw_label(self, img, pixmapper):
         pix1 = pixmapper(self.point)
-        cv.PutText(img, self.label, pix1, cv.InitFont(cv.CV_FONT_HERSHEY_SIMPLEX, 1.0,1.0), self.colour)
+        cv2.putText(img, self.label, pix1, cv2.FONT_HERSHEY_SIMPLEX, 1.0, self.colour)
 
     def draw(self, img, pixmapper, bounds):
         if self.hidden:
@@ -103,27 +107,64 @@ class SlipLabel(SlipObject):
             return None
         return (self.point[0], self.point[1], 0, 0)
 
+class SlipArrow(SlipObject):
+    '''an arrow to display direction of movement'''
+    def __init__(self, key, layer, xy_pix, colour, linewidth, rotation, reverse = False, arrow_size = 7, popup_menu=None):
+        SlipObject.__init__(self, key, layer, popup_menu=popup_menu)
+        self.xy_pix = xy_pix
+        self.colour = colour
+        self.arrow_size = arrow_size
+        self.linewidth = linewidth
+        if reverse:
+            self.rotation = rotation + math.pi
+        else:
+            self.rotation = rotation
+
+    def draw(self, img):
+        if self.hidden:
+            return
+        crot = self.arrow_size*math.cos(self.rotation)
+        srot = self.arrow_size*math.sin(self.rotation)
+        x1 = -crot-srot
+        x2 = crot-srot
+        y1 = crot-srot
+        y2 = crot+srot
+        pix1 = (int(self.xy_pix[0]+x1), int(self.xy_pix[1]+y1))
+        pix2 = (int(self.xy_pix[0]+x2), int(self.xy_pix[1]+y2))
+        cv2.line(img, pix1, self.xy_pix, self.colour, self.linewidth)
+        cv2.line(img, pix2, self.xy_pix, self.colour, self.linewidth)
+
 class SlipCircle(SlipObject):
     '''a circle to display on the map'''
-    def __init__(self, key, layer, latlon, radius, color, linewidth, popup_menu=None):
+    def __init__(self, key, layer, latlon, radius, color, linewidth, arrow = False, popup_menu=None):
         SlipObject.__init__(self, key, layer, popup_menu=popup_menu)
         self.latlon = latlon
-        self.radius = float(radius)
+        if radius < 0:
+            self.reverse = True
+        else:
+            self.reverse = False
+        self.radius = abs(float(radius))
         self.color = color
         self.linewidth = linewidth
+        self.arrow = arrow
 
     def draw(self, img, pixmapper, bounds):
         if self.hidden:
             return
         center_px = pixmapper(self.latlon)
-        #figure out pixels per meter
+        # figure out pixels per meter
         ref_pt = (self.latlon[0] + 1.0, self.latlon[1])
         dis = mp_util.gps_distance(self.latlon[0], self.latlon[1], ref_pt[0], ref_pt[1])
         ref_px = pixmapper(ref_pt)
         dis_px = math.sqrt(float(center_px[1] - ref_px[1]) ** 2.0)
         pixels_per_meter = dis_px / dis
-
-        cv.Circle(img, center_px, int(self.radius * pixels_per_meter), self.color, self.linewidth)
+        radius_px = int(self.radius * pixels_per_meter)
+        cv2.circle(img, center_px, radius_px, self.color, self.linewidth)
+        if self.arrow:
+            SlipArrow(self.key, self.layer, (center_px[0]-radius_px, center_px[1]),
+                      self.color, self.linewidth, 0, reverse = self.reverse).draw(img)
+            SlipArrow(self.key, self.layer, (center_px[0]+radius_px, center_px[1]),
+                      self.color, self.linewidth, math.pi, reverse = self.reverse).draw(img)
 
     def bounds(self):
         '''return bounding box'''
@@ -133,11 +174,12 @@ class SlipCircle(SlipObject):
 
 class SlipPolygon(SlipObject):
     '''a polygon to display on the map'''
-    def __init__(self, key, points, layer, colour, linewidth, popup_menu=None):
+    def __init__(self, key, points, layer, colour, linewidth, arrow = False, popup_menu=None):
         SlipObject.__init__(self, key, layer, popup_menu=popup_menu)
         self.points = points
         self.colour = colour
         self.linewidth = linewidth
+        self.arrow = arrow
         self._bounds = mp_util.polygon_bounds(self.points)
         self._pix_points = []
         self._selected_vertex = None
@@ -152,18 +194,24 @@ class SlipPolygon(SlipObject):
         '''draw a line on the image'''
         pix1 = pixmapper(pt1)
         pix2 = pixmapper(pt2)
-        clipped = cv.ClipLine((img.width, img.height), pix1, pix2)
-        if clipped is None:
+        (width, height) = image_shape(img)
+        (ret, pix1, pix2) = cv2.clipLine((0, 0, width, height), pix1, pix2)
+        if ret is False:
             if len(self._pix_points) == 0:
                 self._pix_points.append(None)
             self._pix_points.append(None)
             return
-        (pix1, pix2) = clipped
-        cv.Line(img, pix1, pix2, colour, linewidth)
-        cv.Circle(img, pix2, linewidth*2, colour)
+        cv2.line(img, pix1, pix2, colour, linewidth)
+        cv2.circle(img, pix2, linewidth*2, colour)
         if len(self._pix_points) == 0:
             self._pix_points.append(pix1)
         self._pix_points.append(pix2)
+        if self.arrow:
+            xdiff = pix2[0]-pix1[0]
+            ydiff = pix2[1]-pix1[1]
+            if (xdiff*xdiff + ydiff*ydiff) > 400: # the segment is longer than 20 pix
+                SlipArrow(self.key, self.layer, (int(pix1[0]+xdiff/2.0), int(pix1[1]+ydiff/2.0)), self.colour,
+                          self.linewidth, math.atan2(ydiff, xdiff)+math.pi/2.0).draw(img)
 
     def draw(self, img, pixmapper, bounds):
         '''draw a polygon on the image'''
@@ -209,12 +257,12 @@ class SlipGrid(SlipObject):
         '''draw a line on the image'''
         pix1 = pixmapper(pt1)
         pix2 = pixmapper(pt2)
-        clipped = cv.ClipLine((img.width, img.height), pix1, pix2)
-        if clipped is None:
+        (width, height) = image_shape(img)
+        (ret, pix1, pix2) = cv2.clipLine((0, 0, width, height), pix1, pix2)
+        if ret is False:
             return
-        (pix1, pix2) = clipped
-        cv.Line(img, pix1, pix2, colour, linewidth)
-        cv.Circle(img, pix2, linewidth*2, colour)
+        cv2.line(img, pix1, pix2, colour, linewidth)
+        cv2.circle(img, pix2, linewidth*2, colour)
 
     def draw(self, img, pixmapper, bounds):
         '''draw a polygon on the image'''
@@ -242,6 +290,72 @@ class SlipGrid(SlipObject):
             pos3 = mp_util.gps_newpos(pos1[0], pos1[1], 90, 3*count*spacing)
             self.draw_line(img, pixmapper, pos1, pos3, self.colour, self.linewidth)
 
+
+class SlipFlightModeLegend(SlipObject):
+    '''a legend to display in the map area'''
+    def __init__(self, key, tuples, layer=1):
+        SlipObject.__init__(self, key, layer)
+        self.tuples = tuples
+        self._img = None
+        self.top_margin = 5
+        self.bottom_margin = 5
+        self.left_margin = 5
+        self.right_margin = 5
+        self.swatch_min_width = 5
+        self.swatch_min_height = 5
+        self.swatch_text_gap = 2
+        self.row_gap = 2
+        self.border_width = 1
+        self.border_colour = (255,0,0)
+        self.text_colour = (0,0,0)
+        self.font_scale = 0.5
+
+    def draw_legend(self):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        fontscale = self.font_scale
+        width = 0
+        height = self.top_margin + self.bottom_margin
+        row_height_max = self.swatch_min_height
+        for (mode, colour) in self.tuples:
+            if mode is None:
+                mode = "Unknown"
+            ((tw,th),tb) = cv2.getTextSize(mode, font, fontscale, 1)
+            width = max(width, tw)
+            row_height_max = max(row_height_max, th)
+        row_count = len(self.tuples)
+        height = self.top_margin + row_count*row_height_max + (row_count-1)*self.row_gap + self.bottom_margin
+        swatch_height = max(self.swatch_min_height, row_height_max)
+        swatch_width = max(self.swatch_min_width, swatch_height)
+        width += self.left_margin + self.right_margin
+        width += swatch_width + self.swatch_text_gap
+        img = np.zeros((height,width,3),np.uint8)
+        img[:] = (255,255,255)
+        cv2.rectangle(img, (0, 0), (width-1, height-1),
+                     self.border_colour, self.border_width)
+        y = self.top_margin
+        for (mode, colour) in self.tuples:
+            if mode is None:
+                mode = "Unknown"
+            x = self.left_margin
+            cv2.rectangle(img, (x, y), (x+swatch_width-1, y+swatch_height-1), colour, -1)
+            x += swatch_width
+            x += self.swatch_text_gap
+            cv2.putText(img, mode, (x, y+row_height_max), font, fontscale, self.text_colour)
+            y += row_height_max + self.row_gap
+
+        return img
+
+    def draw(self, img, pixmapper, bounds):
+        '''draw legend on the image'''
+        if self._img is None:
+            self._img = self.draw_legend()
+
+        w = self._img.shape[1]
+        h = self._img.shape[0]
+        px = 5
+        py = 5
+        img[py:py+h,px:px+w] = self._img
+
 class SlipThumbnail(SlipObject):
     '''a thumbnail to display on the map'''
     def __init__(self, key, latlon, layer, img,
@@ -250,9 +364,10 @@ class SlipThumbnail(SlipObject):
         SlipObject.__init__(self, key, layer, popup_menu=popup_menu)
         self.latlon = latlon
         self._img = None
-        self.imgstr = img.tostring()
-        self.width = img.width
-        self.height = img.height
+        if not hasattr(img, 'shape'):
+            img = np.asarray(img[:,:])
+        self.original_img = img
+        (self.width, self.height) = image_shape(img)
         self.border_width = border_width
         self.border_colour = border_colour
         self.posx = -1
@@ -267,13 +382,11 @@ class SlipThumbnail(SlipObject):
     def img(self):
         '''return a cv image for the thumbnail'''
         if self._img is not None:
-            return self._img
-        self._img = cv.CreateImage((self.width, self.height), 8, 3)
-        cv.SetData(self._img, self.imgstr)
-        cv.CvtColor(self._img, self._img, cv.CV_BGR2RGB)
+            return self._img 
+        self._img = cv2.cvtColor(self.original_img, cv2.COLOR_BGR2RGB)
         if self.border_width and self.border_colour is not None:
-            cv.Rectangle(self._img, (0, 0), (self.width-1, self.height-1),
-                         self.border_colour, self.border_width)
+            cv2.rectangle(self._img, (0, 0), (self.width-1, self.height-1),
+                          self.border_colour, self.border_width)
         return self._img
 
     def draw(self, img, pixmapper, bounds):
@@ -284,18 +397,14 @@ class SlipThumbnail(SlipObject):
         (px,py) = pixmapper(self.latlon)
 
         # find top left
-        px -= thumb.width/2
-        py -= thumb.height/2
-        w = thumb.width
-        h = thumb.height
+        (w, h) = image_shape(thumb)
+        px -= w/2
+        py -= h/2
 
         (px, py, sx, sy, w, h) = self.clip(px, py, w, h, img)
 
-        cv.SetImageROI(thumb, (sx, sy, w, h))
-        cv.SetImageROI(img, (px, py, w, h))
-        cv.Copy(thumb, img)
-        cv.ResetImageROI(img)
-        cv.ResetImageROI(thumb)
+        thumb_roi = thumb[sy:sy+h, sx:sx+w]
+        img[py:py+h, px:px+w] = thumb_roi
 
         # remember where we placed it for clicked()
         self.posx = px+w/2
@@ -332,8 +441,9 @@ class SlipTrail:
         '''draw the trail'''
         for p in self.points:
             (px,py) = pixmapper(p)
-            if px >= 0 and py >= 0 and px < img.width and py < img.height:
-                cv.Circle(img, (px,py), 1, self.colour)
+            (width, height) = image_shape(img)
+            if px >= 0 and py >= 0 and px < width and py < height:
+                cv2.circle(img, (px,py), 1, self.colour)
 
 
 class SlipIcon(SlipThumbnail):
@@ -351,11 +461,8 @@ class SlipIcon(SlipThumbnail):
 
         if self.rotation:
             # rotate the image
-            mat = cv.CreateMat(2, 3, cv.CV_32FC1)
-            cv.GetRotationMatrix2D((self.width/2,self.height/2),
-                                   -self.rotation, 1.0, mat)
-            self._rotated = cv.CloneImage(self._img)
-            cv.WarpAffine(self._img, self._rotated, mat)
+            mat = cv2.getRotationMatrix2D((self.height/2, self.width/2), -self.rotation, 1.0)
+            self._rotated = cv2.warpAffine(self._img, mat, (self.height, self.width))
         else:
             self._rotated = self._img
         return self._rotated
@@ -373,23 +480,17 @@ class SlipIcon(SlipThumbnail):
         (px,py) = pixmapper(self.latlon)
 
         # find top left
-        px -= icon.width/2
-        py -= icon.height/2
-        w = icon.width
-        h = icon.height
+        (w, h) = image_shape(icon)
+        px -= w/2
+        py -= h/2
 
         (px, py, sx, sy, w, h) = self.clip(px, py, w, h, img)
 
-        cv.SetImageROI(icon, (sx, sy, w, h))
-        cv.SetImageROI(img, (px, py, w, h))
-        cv.Add(icon, img, img)
-        cv.ResetImageROI(img)
-        cv.ResetImageROI(icon)
+        img[py:py + h, px:px + w] = cv2.add(img[py:py+h, px:px+w], icon[sy:sy+h, sx:sx+w])
 
         # remember where we placed it for clicked()
         self.posx = px+w/2
         self.posy = py+h/2
-
 
 class SlipPosition:
     '''an position object to move an existing object on the map'''
@@ -450,8 +551,7 @@ class SlipInfoImage(SlipInformation):
     def __init__(self, key, img):
         SlipInformation.__init__(self, key)
         self.imgstr = img.tostring()
-        self.width = img.width
-        self.height = img.height
+        (self.width, self.height) = image_shape(img)
         self.imgpanel = None
 
     def img(self):
